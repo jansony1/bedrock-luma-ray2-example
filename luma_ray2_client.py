@@ -252,18 +252,43 @@ class LumaRay2Client:
         logger.info(f"  - 循环播放: {loop}")
         logger.info(f"  - 输出路径: {s3_output_uri}")
         
-        # 处理图片路径
-        start_image_uri = start_image_path
-        if not start_image_path.startswith('s3://'):
-            # 本地文件，需要上传到S3
-            start_image_uri = self._upload_image_to_s3(start_image_path)
+        # 读取并编码图片为base64
+        def encode_image_to_base64(image_path_or_uri):
+            if image_path_or_uri.startswith('s3://'):
+                # 如果是S3路径，先下载到本地
+                import tempfile
+                import os
+                from urllib.parse import urlparse
+                
+                parsed = urlparse(image_path_or_uri)
+                bucket = parsed.netloc
+                key = parsed.path.lstrip('/')
+                
+                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                    self.s3_client.download_file(bucket, key, tmp_file.name)
+                    with open(tmp_file.name, 'rb') as f:
+                        image_data = f.read()
+                    os.unlink(tmp_file.name)
+            else:
+                # 本地文件
+                with open(image_path_or_uri, 'rb') as f:
+                    image_data = f.read()
+            
+            import base64
+            return base64.b64encode(image_data).decode('utf-8')
         
-        end_image_uri = None
-        if end_image_path:
-            end_image_uri = end_image_path
-            if not end_image_path.startswith('s3://'):
-                # 本地文件，需要上传到S3
-                end_image_uri = self._upload_image_to_s3(end_image_path)
+        def get_media_type(image_path):
+            ext = Path(image_path).suffix.lower()
+            if ext in ['.jpg', '.jpeg']:
+                return 'image/jpeg'
+            elif ext == '.png':
+                return 'image/png'
+            else:
+                return 'image/jpeg'  # 默认
+        
+        # 编码起始图片
+        start_image_b64 = encode_image_to_base64(start_image_path)
+        start_media_type = get_media_type(start_image_path)
         
         # 构建模型输入
         model_input = {
@@ -275,16 +300,26 @@ class LumaRay2Client:
             "keyframes": {
                 "frame0": {
                     "type": "image",
-                    "image": start_image_uri
+                    "source": {
+                        "type": "base64",
+                        "media_type": start_media_type,
+                        "data": start_image_b64
+                    }
                 }
             }
         }
         
         # 如果有结束图片，添加到关键帧
-        if end_image_uri:
+        if end_image_path:
+            end_image_b64 = encode_image_to_base64(end_image_path)
+            end_media_type = get_media_type(end_image_path)
             model_input["keyframes"]["frame1"] = {
-                "type": "image", 
-                "image": end_image_uri
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": end_media_type,
+                    "data": end_image_b64
+                }
             }
         
         output_config = {
