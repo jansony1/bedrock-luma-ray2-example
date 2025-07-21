@@ -187,12 +187,32 @@ result = client.wait_for_completion(arn, max_wait_time=600)
 
 ## 📞 快速开始
 
-### 方法1: 运行奥特曼vs哥斯拉示例
+### 🚀 方法1: 一键自动设置（推荐新手）
 ```bash
+# 克隆项目
+git clone https://github.com/jansony1/bedrock-luma-ray2-example.git
+cd bedrock-luma-ray2-example
+
+# 一键设置环境（自动安装依赖、检查配置、创建S3桶等）
+./setup.sh
+
+# 运行奥特曼vs哥斯拉示例
 python3 generate_ultraman_godzilla_boto3.py
 ```
 
-### 方法2: 运行完整示例
+### ⚡ 方法2: 手动设置（适合有经验用户）
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置AWS凭证（如果未配置）
+aws configure
+
+# 运行示例
+python3 generate_ultraman_godzilla_boto3.py
+```
+
+### 🎬 方法3: 运行完整示例集合
 ```bash
 python3 examples.py
 ```
@@ -201,14 +221,14 @@ python3 examples.py
 
 ```
 aws-bedrock-luma-ray2/
-├── luma_ray2_client.py              # 主客户端（AWS原生方法）
-├── examples.py                      # 基础使用示例
-├── generate_ultraman_godzilla_boto3.py  # 奥特曼vs哥斯拉示例
-├── requirements.txt                 # 依赖包
-├── setup.sh                        # 快速安装脚本
-├── README.md                       # 项目说明
-├── METHOD_COMPARISON.md            # 方法对比文档
-├── SOLUTION.md                     # 问题解决指南
+├── luma_ray2_client.py              # 🎯 主客户端（AWS原生方法）
+├── setup.sh                        # 🚀 一键环境设置脚本（推荐首次使用）
+├── generate_ultraman_godzilla_boto3.py  # 🎬 奥特曼vs哥斯拉示例
+├── examples.py                      # 📚 完整使用示例
+├── requirements.txt                 # 📦 依赖包
+├── README.md                       # 📖 项目说明
+├── SOLUTION.md                     # 🔧 问题解决指南
+├── METHOD_COMPARISON.md            # 📊 方法对比文档（历史参考）
 ├── .gitignore                      # Git忽略文件
 └── LICENSE                         # MIT许可证
 ```
