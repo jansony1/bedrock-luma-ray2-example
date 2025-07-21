@@ -11,16 +11,7 @@
 - ✅ **双关键帧**: 支持起始帧+结束帧的视频生成
 - ✅ **详细日志**: 启动时输出prompt和参数信息
 - ✅ **异步处理**: 支持任务状态检查和等待完成
-- ✅ **双调用方法**: boto3标准方法 + 原始HTTP请求备用
-- ✅ **自动回退**: 智能选择最佳调用方法
-
-## 🎬 **最新更新**
-
-### **重大修复**: boto3方法现已完全可用！
-- 🔧 修正了`modelInput`参数传递格式
-- ✅ boto3标准方法现在是推荐的调用方式
-- 🔄 保留原始HTTP请求作为备用方案
-- 📊 添加了完整的方法对比和测试套件
+- ✅ **AWS原生方法**: 使用boto3标准API调用
 
 ## 📋 环境要求
 
@@ -77,9 +68,9 @@ aws s3api put-bucket-policy --bucket s3-demo-zy --policy '{
 ### 快速开始
 
 ```python
-from luma_ray2_client_complete import LumaRay2Client
+from luma_ray2_client import LumaRay2Client
 
-# 初始化客户端（推荐方式）
+# 初始化客户端
 client = LumaRay2Client()
 
 # 1. 文本到视频
@@ -95,10 +86,6 @@ result = client.wait_for_completion(arn)
 ### 高级用法
 
 ```python
-# 使用特定调用方法
-client_boto3 = LumaRay2Client(use_raw_http=False)  # 仅boto3
-client_http = LumaRay2Client(use_raw_http=True)    # 仅HTTP请求
-
 # 图片到视频
 arn = client.image_to_video(
     prompt="让这张图片动起来",
@@ -115,16 +102,6 @@ arn = client.image_to_video(
     start_image_path="s3://my-bucket/image.jpg"  # S3路径
 )
 ```
-
-## 🎯 **调用方法对比**
-
-| 方法 | 状态 | 推荐度 | 说明 |
-|------|------|--------|------|
-| **boto3标准方法** | ✅ 可用 | ⭐⭐⭐⭐⭐ | 官方SDK，稳定可靠 |
-| **原始HTTP请求** | ⚠️ 备用 | ⭐⭐⭐ | 特殊情况使用 |
-| **自动回退机制** | ✅ 推荐 | ⭐⭐⭐⭐⭐ | 最佳实践 |
-
-详细对比请查看 [METHOD_COMPARISON.md](METHOD_COMPARISON.md)
 
 ## 📊 支持的参数
 
@@ -154,7 +131,7 @@ arn = client.image_to_video(
 
 ```
 === 启动文本到视频生成任务 ===
-调用方法: boto3标准方法（自动回退）
+调用方法: boto3标准方法
 Prompt: Ultraman fighting Godzilla in the ocean
 参数配置:
   - 宽高比: 16:9
@@ -220,20 +197,13 @@ python3 generate_ultraman_godzilla_boto3.py
 python3 examples.py
 ```
 
-### 方法3: 测试两种调用方法
-```bash
-python3 test_both_methods.py
-```
-
 ## 📁 项目结构
 
 ```
 aws-bedrock-luma-ray2/
-├── luma_ray2_client.py              # 原始客户端
-├── luma_ray2_client_complete.py     # 完整客户端（推荐）
+├── luma_ray2_client.py              # 主客户端（AWS原生方法）
 ├── examples.py                      # 基础使用示例
 ├── generate_ultraman_godzilla_boto3.py  # 奥特曼vs哥斯拉示例
-├── test_both_methods.py             # 方法对比测试
 ├── requirements.txt                 # 依赖包
 ├── setup.sh                        # 快速安装脚本
 ├── README.md                       # 项目说明

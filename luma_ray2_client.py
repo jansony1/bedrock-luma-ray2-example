@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 AWS Bedrock Luma Ray2 模型调用客户端
-支持文本到视频和图片到视频生成
-支持本地图片文件和S3图片路径作为输入
+使用AWS原生boto3方法调用Luma Ray2模型生成视频
 """
 
 import boto3
@@ -10,10 +9,12 @@ import json
 import time
 import base64
 import logging
+# import requests  # HTTP方法需要的依赖，已注释
 from typing import Optional, Dict, Any
 from pathlib import Path
-import re
 from urllib.parse import urlparse
+# from botocore.auth import SigV4Auth  # HTTP方法需要的依赖，已注释
+# from botocore.awsrequest import AWSRequest  # HTTP方法需要的依赖，已注释
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ class LumaRay2Client:
         Args:
             region_name: AWS区域名称
         """
+        self.region_name = region_name
         self.bedrock_runtime = boto3.client(
             'bedrock-runtime',
             region_name=region_name
@@ -38,44 +40,102 @@ class LumaRay2Client:
             region_name=region_name
         )
         self.model_id = "luma.ray-v2:0"
+        
+        # HTTP方法需要的凭证获取，已注释
+        # session = boto3.Session()
+        # self.credentials = session.get_credentials()
     
-    def _is_s3_path(self, path: str) -> bool:
-        """检查路径是否为S3路径"""
-        return path.startswith('s3://')
-    
-    def _parse_s3_path(self, s3_path: str) -> tuple:
-        """解析S3路径，返回bucket和key"""
-        parsed = urlparse(s3_path)
-        bucket = parsed.netloc
-        key = parsed.path.lstrip('/')
-        return bucket, key
-    
-    def _download_s3_image(self, s3_path: str) -> bytes:
-        """从S3下载图片数据"""
+    def _make_boto3_request(self, model_input: Dict, output_config: Dict) -> str:
+        """使用boto3标准方法调用API"""
         try:
-            bucket, key = self._parse_s3_path(s3_path)
-            logger.info(f"从S3下载图片: s3://{bucket}/{key}")
+            logger.info("🔧 使用boto3标准方法调用...")
             
-            response = self.s3_client.get_object(Bucket=bucket, Key=key)
-            return response['Body'].read()
+            # 根据官方API文档，modelInput应该是JSON value，不是字符串
+            response = self.bedrock_runtime.start_async_invoke(
+                modelId=self.model_id,
+                modelInput=model_input,  # 直接传递字典，不转换为字符串
+                outputDataConfig=output_config
+            )
+            
+            logger.info("✅ boto3方法调用成功!")
+            return response['invocationArn']
+            
         except Exception as e:
-            logger.error(f"从S3下载图片失败: {str(e)}")
+            logger.error(f"❌ boto3方法失败: {str(e)}")
             raise
     
-    def _encode_image_from_path(self, image_path: str) -> str:
-        """从本地文件或S3路径编码图片为base64"""
+    # ========== HTTP方法实现（已注释，保留作为参考） ==========
+    # def _make_raw_request(self, payload: Dict) -> str:
+    #     """使用原始HTTP请求调用API"""
+    #     try:
+    #         logger.info("🔧 使用原始HTTP请求方法调用...")
+    #         
+    #         # 构建请求URL
+    #         url = f"https://bedrock-runtime.{self.region_name}.amazonaws.com/async-invoke"
+    #         
+    #         # 构建请求头
+    #         headers = {
+    #             'Content-Type': 'application/json',
+    #             'Accept': 'application/json'
+    #         }
+    #         
+    #         # 创建AWS请求对象
+    #         request = AWSRequest(
+    #             method='POST',
+    #             url=url,
+    #             data=json.dumps(payload),
+    #             headers=headers
+    #         )
+    #         
+    #         # 使用SigV4签名
+    #         SigV4Auth(self.credentials, 'bedrock', self.region_name).add_auth(request)
+    #         
+    #         # 发送请求
+    #         response = requests.post(
+    #             url,
+    #             data=request.body,
+    #             headers=dict(request.headers)
+    #         )
+    #         
+    #         if response.status_code == 200:
+    #             result = response.json()
+    #             logger.info("✅ 原始HTTP请求调用成功!")
+    #             return result['invocationArn']
+    #         else:
+    #             error_msg = f"HTTP请求失败: {response.status_code} - {response.text}"
+    #             logger.error(f"❌ {error_msg}")
+    #             raise Exception(error_msg)
+    #             
+    #     except Exception as e:
+    #         logger.error(f"❌ 原始HTTP请求失败: {str(e)}")
+    #         raise
+    
+    def _upload_image_to_s3(self, image_path: str) -> str:
+        """
+        上传本地图片到S3并返回S3 URI
+        
+        Args:
+            image_path: 本地图片路径
+            
+        Returns:
+            S3 URI
+        """
         try:
-            if self._is_s3_path(image_path):
-                # S3路径
-                image_data = self._download_s3_image(image_path)
-                return base64.b64encode(image_data).decode('utf-8')
-            else:
-                # 本地文件路径
-                logger.info(f"读取本地图片: {image_path}")
-                with open(image_path, "rb") as image_file:
-                    return base64.b64encode(image_file.read()).decode('utf-8')
+            # 生成唯一的S3键名
+            import uuid
+            file_extension = Path(image_path).suffix
+            s3_key = f"temp_images/{uuid.uuid4()}{file_extension}"
+            bucket_name = "s3-demo-zy"
+            
+            # 上传文件
+            self.s3_client.upload_file(image_path, bucket_name, s3_key)
+            s3_uri = f"s3://{bucket_name}/{s3_key}"
+            
+            logger.info(f"📤 图片已上传到S3: {s3_uri}")
+            return s3_uri
+            
         except Exception as e:
-            logger.error(f"图片编码失败: {str(e)}")
+            logger.error(f"❌ 图片上传失败: {str(e)}")
             raise
     
     def text_to_video(
@@ -106,6 +166,7 @@ class LumaRay2Client:
         
         # 输出启动信息
         logger.info("=== 启动文本到视频生成任务 ===")
+        logger.info(f"调用方法: boto3标准方法")
         logger.info(f"Prompt: {prompt}")
         logger.info(f"参数配置:")
         logger.info(f"  - 宽高比: {aspect_ratio}")
@@ -114,6 +175,7 @@ class LumaRay2Client:
         logger.info(f"  - 循环播放: {loop}")
         logger.info(f"  - 输出路径: {s3_output_uri}")
         
+        # 构建模型输入（作为字典，不是字符串）
         model_input = {
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
@@ -128,29 +190,30 @@ class LumaRay2Client:
             }
         }
         
-        try:
-            response = self.bedrock_runtime.start_async_invoke(
-                modelId=self.model_id,
-                modelInput=json.dumps(model_input),
-                outputDataConfig=output_config
-            )
-            
-            invocation_arn = response['invocationArn']
-            logger.info(f"✅ 文本到视频任务已启动: {invocation_arn}")
-            return invocation_arn
-            
-        except Exception as e:
-            logger.error(f"❌ 启动文本到视频任务失败: {str(e)}")
-            raise
+        # 使用boto3标准方法
+        invocation_arn = self._make_boto3_request(model_input, output_config)
+        logger.info(f"✅ 文本到视频任务已启动: {invocation_arn}")
+        return invocation_arn
+        
+        # ========== HTTP方法调用（已注释，保留作为参考） ==========
+        # # 构建HTTP请求payload
+        # payload = {
+        #     "modelId": self.model_id,
+        #     "modelInput": model_input,
+        #     "outputDataConfig": output_config
+        # }
+        # 
+        # # 使用原始HTTP请求方法
+        # invocation_arn = self._make_raw_request(payload)
+        # logger.info(f"✅ 文本到视频任务已启动: {invocation_arn}")
+        # return invocation_arn
     
     def image_to_video(
         self,
         prompt: str,
         s3_output_uri: str,
-        start_image_path: Optional[str] = None,
+        start_image_path: str,
         end_image_path: Optional[str] = None,
-        start_image_base64: Optional[str] = None,
-        end_image_base64: Optional[str] = None,
         aspect_ratio: str = "16:9",
         duration: str = "5s",
         resolution: str = "720p",
@@ -160,12 +223,10 @@ class LumaRay2Client:
         图片到视频生成
         
         Args:
-            prompt: 视频描述文本
+            prompt: 视频描述文本 (1-5000字符)
             s3_output_uri: S3输出路径
-            start_image_path: 起始帧图片路径（支持本地文件或s3://路径）
-            end_image_path: 结束帧图片路径（支持本地文件或s3://路径）
-            start_image_base64: 起始帧图片base64数据
-            end_image_base64: 结束帧图片base64数据
+            start_image_path: 起始图片路径（本地文件或S3路径）
+            end_image_path: 结束图片路径（可选，本地文件或S3路径）
             aspect_ratio: 宽高比
             duration: 视频时长
             resolution: 分辨率
@@ -174,58 +235,56 @@ class LumaRay2Client:
         Returns:
             任务ARN
         """
+        if not (1 <= len(prompt) <= 5000):
+            raise ValueError("提示文本长度必须在1-5000字符之间")
+        
         # 输出启动信息
         logger.info("=== 启动图片到视频生成任务 ===")
+        logger.info(f"调用方法: boto3标准方法")
         logger.info(f"Prompt: {prompt}")
         logger.info(f"参数配置:")
+        logger.info(f"  - 起始图片: {start_image_path}")
+        if end_image_path:
+            logger.info(f"  - 结束图片: {end_image_path}")
         logger.info(f"  - 宽高比: {aspect_ratio}")
         logger.info(f"  - 时长: {duration}")
         logger.info(f"  - 分辨率: {resolution}")
         logger.info(f"  - 循环播放: {loop}")
         logger.info(f"  - 输出路径: {s3_output_uri}")
         
-        if start_image_path:
-            logger.info(f"  - 起始帧图片: {start_image_path}")
-        if end_image_path:
-            logger.info(f"  - 结束帧图片: {end_image_path}")
+        # 处理图片路径
+        start_image_uri = start_image_path
+        if not start_image_path.startswith('s3://'):
+            # 本地文件，需要上传到S3
+            start_image_uri = self._upload_image_to_s3(start_image_path)
         
+        end_image_uri = None
+        if end_image_path:
+            end_image_uri = end_image_path
+            if not end_image_path.startswith('s3://'):
+                # 本地文件，需要上传到S3
+                end_image_uri = self._upload_image_to_s3(end_image_path)
+        
+        # 构建模型输入
         model_input = {
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
             "duration": duration,
             "resolution": resolution,
             "loop": loop,
-            "keyframes": {}
-        }
-        
-        # 处理起始帧
-        if start_image_path or start_image_base64:
-            if start_image_path:
-                logger.info("正在处理起始帧图片...")
-                start_image_base64 = self._encode_image_from_path(start_image_path)
-            
-            model_input["keyframes"]["frame0"] = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": start_image_base64
+            "keyframes": {
+                "frame0": {
+                    "type": "image",
+                    "image": start_image_uri
                 }
             }
+        }
         
-        # 处理结束帧
-        if end_image_path or end_image_base64:
-            if end_image_path:
-                logger.info("正在处理结束帧图片...")
-                end_image_base64 = self._encode_image_from_path(end_image_path)
-            
+        # 如果有结束图片，添加到关键帧
+        if end_image_uri:
             model_input["keyframes"]["frame1"] = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": end_image_base64
-                }
+                "type": "image", 
+                "image": end_image_uri
             }
         
         output_config = {
@@ -234,20 +293,23 @@ class LumaRay2Client:
             }
         }
         
-        try:
-            response = self.bedrock_runtime.start_async_invoke(
-                modelId=self.model_id,
-                modelInput=json.dumps(model_input),
-                outputDataConfig=output_config
-            )
-            
-            invocation_arn = response['invocationArn']
-            logger.info(f"✅ 图片到视频任务已启动: {invocation_arn}")
-            return invocation_arn
-            
-        except Exception as e:
-            logger.error(f"❌ 启动图片到视频任务失败: {str(e)}")
-            raise
+        # 使用boto3标准方法
+        invocation_arn = self._make_boto3_request(model_input, output_config)
+        logger.info(f"✅ 图片到视频任务已启动: {invocation_arn}")
+        return invocation_arn
+        
+        # ========== HTTP方法调用（已注释，保留作为参考） ==========
+        # # 构建HTTP请求payload
+        # payload = {
+        #     "modelId": self.model_id,
+        #     "modelInput": model_input,
+        #     "outputDataConfig": output_config
+        # }
+        # 
+        # # 使用原始HTTP请求方法
+        # invocation_arn = self._make_raw_request(payload)
+        # logger.info(f"✅ 图片到视频任务已启动: {invocation_arn}")
+        # return invocation_arn
     
     def get_job_status(self, invocation_arn: str) -> Dict[str, Any]:
         """
@@ -265,12 +327,12 @@ class LumaRay2Client:
             )
             return response
         except Exception as e:
-            logger.error(f"获取任务状态失败: {str(e)}")
+            logger.error(f"❌ 获取任务状态失败: {str(e)}")
             raise
     
     def wait_for_completion(
-        self,
-        invocation_arn: str,
+        self, 
+        invocation_arn: str, 
         max_wait_time: int = 600,
         check_interval: int = 30
     ) -> Optional[Dict[str, Any]]:
@@ -283,33 +345,32 @@ class LumaRay2Client:
             check_interval: 检查间隔（秒）
             
         Returns:
-            最终任务状态
+            任务完成后的状态信息，超时返回None
         """
         start_time = time.time()
         
         while time.time() - start_time < max_wait_time:
             try:
-                status_response = self.get_job_status(invocation_arn)
-                status = status_response['status']
+                status_info = self.get_job_status(invocation_arn)
+                status = status_info.get('status', 'Unknown')
                 
                 logger.info(f"任务状态: {status}")
                 
                 if status == 'Completed':
                     logger.info("视频生成完成！")
-                    output_uri = status_response.get('outputDataConfig', {}).get('s3OutputDataConfig', {}).get('s3Uri')
+                    # 获取输出信息
+                    output_config = status_info.get('outputDataConfig', {})
+                    s3_output = output_config.get('s3OutputDataConfig', {})
+                    output_uri = s3_output.get('s3Uri', '')
                     if output_uri:
                         logger.info(f"输出位置: {output_uri}")
-                    return status_response
-                    
+                    return status_info
                 elif status == 'Failed':
-                    error_msg = status_response.get('failureMessage', '未知错误')
-                    logger.error(f"任务失败: {error_msg}")
-                    return status_response
-                    
+                    logger.error("任务执行失败")
+                    return status_info
                 elif status in ['InProgress', 'Submitted']:
                     logger.info(f"任务进行中，{check_interval}秒后再次检查...")
                     time.sleep(check_interval)
-                    
                 else:
                     logger.warning(f"未知状态: {status}")
                     time.sleep(check_interval)
@@ -318,12 +379,12 @@ class LumaRay2Client:
                 logger.error(f"检查任务状态时出错: {str(e)}")
                 time.sleep(check_interval)
         
-        logger.warning("等待超时")
+        logger.warning(f"等待超时（{max_wait_time}秒）")
         return None
     
     def list_jobs(self, max_results: int = 10) -> Dict[str, Any]:
         """
-        列出异步任务
+        列出异步调用任务
         
         Args:
             max_results: 最大返回结果数
@@ -337,7 +398,7 @@ class LumaRay2Client:
             )
             return response
         except Exception as e:
-            logger.error(f"列出任务失败: {str(e)}")
+            logger.error(f"❌ 获取任务列表失败: {str(e)}")
             raise
 
 
@@ -352,3 +413,19 @@ def quick_image_to_video(prompt: str, image_path: str, output_path: str = "s3://
     """快速图片到视频生成"""
     client = LumaRay2Client()
     return client.image_to_video(prompt, output_path, start_image_path=image_path)
+
+
+if __name__ == "__main__":
+    # 简单测试
+    print("🎬 Luma Ray2 客户端测试")
+    client = LumaRay2Client()
+    
+    # 测试文本到视频
+    try:
+        arn = client.text_to_video(
+            prompt="A beautiful sunset over the ocean",
+            s3_output_uri="s3://s3-demo-zy/luma_test/"
+        )
+        print(f"✅ 任务启动成功: {arn}")
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
